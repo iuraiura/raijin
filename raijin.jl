@@ -22,7 +22,7 @@ API_NAME = ""
 POOL = 1000000
 
 # 投入金額再評価回数。チケット数程度。
-UNITS_TIME = 10
+UNITS_TIME = 50
 
 # 使用通貨ペア設定
 #   フォーマット
@@ -92,13 +92,12 @@ UNITS_TIME = 10
 @everywhere PRECISION = 1
 # 日本円での大体の金額
 @everywhere UNITS = 2
-# 使用可不可
+
 @everywhere  USE = 3
 # サンプリング単位時間[一日単位で]
 GRANULARITY = "D"
-# サンプリング数[四半期を考えている。２０営業日＊３＋５営業日]
-TIMES = -65
-# サンプリング補正値[サンプリング単位時間だけでは最新の値が反映されないため]
+# サンプリング数[半期を考えている。２０営業日＊６＋５営業日]
+TIMES = -125
 GRANULARITY_S = "H1"
 TIMES_S = -24
 INTERVAL_TIME = 60
@@ -107,9 +106,32 @@ LECERAGE = 25
 # リトライ回数
 RETRY = 5
 
+GRANULARITY_SECONDS = Dict([("S5", 5),
+                            ("S10", 10),
+                            ("S15", 15),
+                            ("S30", 30),
+                            ("M1", 1 * 60),
+                            ("M2", 2 * 60),
+                            ("M3", 3 * 60),
+                            ("M4", 4 * 60),
+                            ("M5", 5 * 60),
+                            ("M10", 10 * 60),
+                            ("M15", 15 * 60),
+                            ("M30", 30 * 60),
+                            ("H1", 1 * 60 * 60),
+                            ("H2", 2 * 60 * 60),
+                            ("H3", 3 * 60 * 60),
+                            ("H4", 4 * 60 * 60),
+                            ("H6", 6 * 60 * 60),
+                            ("H8", 8 * 60 * 60),
+                            ("H12", 12 * 60 * 60),
+                            ("D", 24 * 60 * 60),
+                            ("W", 5 * 24 * 60 * 60),
+                            ("M", 20 * 24 * 60 * 60)
+                            ])
+
 ##########################################################################
-# MCMC データモデル
-#   Mamba の例題そのまま
+# MCMC model
 model = Model(
 
     y = Stochastic(1,
@@ -294,19 +316,15 @@ function simulation(instrument::AbstractString)
     j = 0
     cv = []
     tdata = []
-    code, cand1 = get_candles(instrument, GRANULARITY, TIMES, now(Dates.UTC))
+    code, cand1 = get_candles(instrument, GRANULARITY, TIMES, (now(Dates.UTC) - Dates.Second(GRANULARITY_SECONDS[GRANULARITY])))
     if code > 0
         return 0
     end
     for i in cand1
         j += 1
-        push!(cv, i["openMid"])
-        push!(tdata, j)
         push!(cv, i["highMid"])
         push!(tdata, j)
         push!(cv, i["lowMid"])
-        push!(tdata, j)
-        push!(cv, i["closeMid"])
         push!(tdata, j)
     end
 
@@ -319,14 +337,13 @@ function simulation(instrument::AbstractString)
         return 0
     end
 
+    k = GRANULARITY_SECONDS[GRANULARITY_S] / GRANULARITY_SECONDS[GRANULARITY]
+
     for i in cand1
-        push!(cv, i["openMid"])
-        push!(tdata, j)
+        j += k
         push!(cv, i["highMid"])
         push!(tdata, j)
         push!(cv, i["lowMid"])
-        push!(tdata, j)
-        push!(cv, i["closeMid"])
         push!(tdata, j)
     end
 
@@ -336,7 +353,6 @@ function simulation(instrument::AbstractString)
     )
 
     data[:N] = length(data[:y])
-    #data[:t] = collect(1:data[:N])
     data[:xmat] = [ones(data[:N]) data[:t]]
 
     inits = [
@@ -355,11 +371,13 @@ function simulation(instrument::AbstractString)
     p = quantile(ppd)
     pdata = p.value
   catch ex
-      println(typeof(ex))
-      showerror(STDOUT, ex)
-      return 0
+    println("simulation : ")
+    println(typeof(ex))
+    showerror(STDOUT, ex)
+    return 0
   end
 end
+
 ##########################################################################
 
 @everywhere function move(account_id::Int64, instrument::AbstractString, pdata::Array)
@@ -370,6 +388,7 @@ end
     end
 
     pside = haskey(tr[1], "side") ? tr[1]["side"] : ""
+    half_line = pside == "buy" ? mean([pdata[end,P250], pdata[end,P500]]) : mean([pdata[end,P750], pdata[end,P500]])
     tside = ""
 
     code, center, spread = get_prices(instrument)
@@ -394,29 +413,32 @@ end
             return
         end
         if side == "buy"
-            if price < pdata[end,P500]
-                tp = pdata[end,P500]
+            if price < half_line
+                tp = half_line
             else
                 tp = price + std_u / 10.0
             end
-            if price < center
-                sp = mean([maximum([price, stop]), center])
-            else
-                sp = pdata[end,P025]
+            if center > pdata[end,P250] > price
+              sp = maximum([pdata[end,P250], stop])
+            elseif center > price
+              sp = stop
+            elseif center < price
+              sp = pdata[end,P025]
             end
         elseif side == "sell"
-            if price > pdata[end,P500]
-                tp = pdata[end,P500]
+            if price > half_line
+                tp = half_line
             else
                 tp = price - std_u / 10.0
             end
-            if price > center
-                sp = mean([minimum([price, stop]), center])
-            else
-                sp = pdata[end,P975]
+            if center < pdata[end,P750]< price
+              sp = minimum([pdata[end,P750], stop])
+            elseif center < price
+              sp = stop
+            elseif center > price
+              sp = pdata[end,P975]
             end
         end
-        #println("$(now()) : レベル調整　side = $side | price = $price | center = $center | sp = $sp | tp = $tp")
         change_trades(account_id, instrument, id, sp, tp)
     end
 
@@ -477,158 +499,10 @@ end
         end
     end
   catch ex
-      println(typeof(ex))
-      showerror(STDOUT, ex)
-      return
-  end
-end
-
-@everywhere function adjustment_stoploss(account_id::Int64)
-  while true
-    try
-      sleep(3)
-      code, tr = get_trades(account_id)
-      if code > 0 || length(tr) == 0
-          continue
-      end
-      inst = []
-
-      for t in tr
-        push!(inst, t["instrument"])
-      end
-      pprice = Dict{AbstractString, Float64}()
-      for i in unique(inst)
-        code, center, spread = get_prices(i)
-        if code > 0
-            break
-        end
-        pprice[i] = center
-        sleep(1/15)
-      end
-
-      for t in tr
-        id = t["id"]
-        side = t["side"]
-        price = t["price"]
-        stop = t["stopLoss"]
-        takep = t["takeProfit"]
-        instrument = t["instrument"]
-        tp = takep
-        sp = stop
-
-        if side == "buy"
-          if price < pprice[instrument]
-            code, center, spread = get_prices(instrument)
-            if code > 0
-                break
-            end
-            if price < center
-              sleep(0.6)
-              code, center, spread = get_prices(instrument)
-              if code > 0
-                  break
-              end
-              if price < center
-                change_trades(account_id, instrument, id, maximum([mean([price, center]), stop]), tp)
-              end
-            end
-          end
-        elseif side == "sell"
-          if price > pprice[instrument]
-            code, center, spread = get_prices(instrument)
-            if code > 0
-                break
-            end
-            if price > center
-              sleep(0.6)
-              code, center, spread = get_prices(instrument)
-              if code > 0
-                  break
-              end
-              if price > center
-                change_trades(account_id, instrument, id, minimum([mean([price, center]), stop]), tp)
-              end
-            end
-          end
-        end
-      end
-
-      pstop = Dict{AbstractString, Float64}()
-      code, ps = get_positions(account_id, "")
-      if code > 0
-          continue
-      end
-
-      for p in ps["positions"]
-          instrument = p["instrument"]
-          side = p["side"]
-          pstop[instrument] = side == "buy" ? 0.0 : typemax(Float64)
-      end
-
-      code, tr = get_trades(account_id)
-      if code > 0 || length(tr) == 0
-          continue
-      end
-      for t in tr
-        side = t["side"]
-        stop = t["stopLoss"]
-        instrument = t["instrument"]
-        if side == "buy"
-          pstop[instrument] = maximum([pstop[instrument], stop])
-        elseif side == "sell"
-          pstop[instrument] = minimum([pstop[instrument], stop])
-        end
-      end
-      for t in tr
-        id = t["id"]
-        side = t["side"]
-        price = t["price"]
-        stop = t["stopLoss"]
-        takep = t["takeProfit"]
-        instrument = t["instrument"]
-        tp = takep
-        sp = stop
-
-        if side == "buy"
-          if price < pprice[instrument]
-            code, center, spread = get_prices(instrument)
-            if code > 0
-                break
-            end
-            if (price < center) && (pstop[instrument] < center)
-              sleep(0.6)
-              code, center, spread = get_prices(instrument)
-              if code > 0
-                  break
-              end
-              if (price < center) && (pstop[instrument] < center)
-                change_trades(account_id, instrument, id, pstop[instrument], tp)
-              end
-            end
-          end
-        elseif side == "sell"
-          if price > pprice[instrument]
-            code, center, spread = get_prices(instrument)
-            if code > 0
-                break
-            end
-            if (price > center) && (pstop[instrument] > center)
-              sleep(0.6)
-              code, center, spread = get_prices(instrument)
-              if code > 0
-                  break
-              end
-              if (price > center) && (pstop[instrument] > center)
-                change_trades(account_id, instrument, id, pstop[instrument], tp)
-              end
-            end
-          end
-        end
-      end
-    catch ex
-        println(typeof(ex))
-        showerror(STDOUT, ex)
-    end
+    println("move : ")
+    println(typeof(ex))
+    showerror(STDOUT, ex)
+    return
   end
 end
 
@@ -649,16 +523,17 @@ function positions(account_id::Int64, instrument::AbstractString, side::Abstract
     end
 
     cv = []
-    code, cand = get_candles(instrument, "M5", -288, now(Dates.UTC))
+    code, cand = get_candles(instrument, "M5", -36, now(Dates.UTC))
     if code > 0
-        return 0
+      return 0
     end
     for i in cand
-        push!(cv, i["openMid"])
-        push!(cv, i["highMid"])
-        push!(cv, i["lowMid"])
-        push!(cv, i["closeMid"])
+      push!(cv, i["openMid"])
+      push!(cv, i["highMid"])
+      push!(cv, i["lowMid"])
+      push!(cv, i["closeMid"])
     end
+    average_data = mean(cv)
 
     code, center, spread = get_prices(instrument)
     if code > 0
@@ -666,27 +541,20 @@ function positions(account_id::Int64, instrument::AbstractString, side::Abstract
       return 0
     end
 
-    std_u = pdata[end,P750] - pdata[end,P500]
-    rate = (pdata[end-1,P500] - pdata[end,P500]) / pdata[end,P500]
-
-    tt = ""
-    price = 0.0
-    takeprofit = pdata[end,P500]
-    stoploss = 0.0
-    trailingstop = 0.0
-
-    # オーダー継続時間の設定
+    # set order time span
     next_time = now(Dates.UTC) + Dates.Minute(INTERVAL_TIME)
-    before_data = mean(cv)
+    std_u = pdata[end,P750] - pdata[end,P500]
 
-    if center < pdata[end,P250] && side != "sell" && (pdata[end,P500] < pdata[1,P500]) && before_data < pdata[end,P500]
-      @async orders(account_id, instrument, unit, "buy", "stop", next_time, pdata[end,P250], pdata[end,P025], pdata[end,P500])
-    elseif pdata[end,P250] < center < pdata[end,P500] && side != "sell" && (pdata[end,P500] < pdata[1,P500]) && before_data < pdata[end,P500]
-      @async orders(account_id, instrument, unit, "buy", "limit", next_time, pdata[end,P250], pdata[end,P025], pdata[end,P500])
-    elseif center > pdata[end,P750] && side != "buy" && (pdata[end,P500] > pdata[1,P500]) && before_data > pdata[end,P500]
-      @async orders(account_id, instrument, unit, "sell", "stop", next_time, pdata[end,P750], pdata[end,P975], pdata[end,P500])
-    elseif pdata[end,P750] > center > pdata[end,P500] && side != "buy" && (pdata[end,P500] > pdata[1,P500]) && before_data > pdata[end,P500]
-      @async orders(account_id, instrument, unit, "sell", "limit", next_time, pdata[end,P750], pdata[end,P975], pdata[end,P500])
+    # buy side
+    if side != "sell" && (pdata[end,P500] < pdata[1,P500])
+      if center < pdata[end,P250] && average_data > center
+        @async orders(account_id, instrument, unit, "buy", "stop", next_time, center + std_u / 10.0, pdata[end,P025], mean([pdata[end,P250], pdata[end,P500]]))
+      end
+    # sell side
+    elseif side != "buy" && (pdata[end,P500] > pdata[1,P500])
+      if center > pdata[end,P750] && average_data < center
+        @async orders(account_id, instrument, unit, "sell", "stop", next_time, center - std_u / 10.0, pdata[end,P975], mean([pdata[end,P750], pdata[end,P500]]))
+      end
     end
 
     println("$(now()) : シミュレーション結果：通貨ペア（$instrument）現在値=$center")
@@ -698,9 +566,10 @@ function positions(account_id::Int64, instrument::AbstractString, side::Abstract
 
     @async move(account_id, instrument, pdata)
   catch ex
-      println(typeof(ex))
-      showerror(STDOUT, ex)
-      return 0
+    println("positions : ")
+    println(typeof(ex))
+    showerror(STDOUT, ex)
+    return 0
   end
 end
 
@@ -722,8 +591,6 @@ if code > 0
     println("$(now()) : アカウントID取得失敗")
     exit
 end
-
-@async adjustment_stoploss(account_id)
 
 while true
   try
