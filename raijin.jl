@@ -421,7 +421,7 @@ end
             if center > pdata[end,P250] > price
               sp = maximum([pdata[end,P250], stop])
             elseif center > price
-              sp = stop
+              sp = mean([center, price])
             elseif center < price
               sp = pdata[end,P025]
             end
@@ -434,7 +434,7 @@ end
             if center < pdata[end,P750]< price
               sp = minimum([pdata[end,P750], stop])
             elseif center < price
-              sp = stop
+              sp = mean([center, price])
             elseif center > price
               sp = pdata[end,P975]
             end
