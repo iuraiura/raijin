@@ -19,7 +19,7 @@ API_NAME = ""
 @everywhere TOKEN = ""
 
 # 為替変動に対応させるため金額のプール設定。使用金額の三分の一程度は指定しておいたほうが良い
-POOL = 1000000
+POOL = 500000
 
 # 投入金額再評価回数。チケット数程度。
 UNITS_TIME = 50
@@ -413,27 +413,23 @@ end
             return
         end
         if side == "buy"
-            if price < half_line
-                tp = half_line
+            if price < pdata[end,P500]
+                tp = pdata[end,P500]
             else
                 tp = price + std_u / 10.0
             end
-            if center > pdata[end,P250] > price
-              sp = maximum([pdata[end,P250], stop])
-            elseif center > price
+            if center > price
               sp = mean([center, price])
             elseif center < price
               sp = pdata[end,P025]
             end
         elseif side == "sell"
-            if price > half_line
-                tp = half_line
+            if price > pdata[end,P500]
+                tp = pdata[end,P500]
             else
                 tp = price - std_u / 10.0
             end
-            if center < pdata[end,P750]< price
-              sp = minimum([pdata[end,P750], stop])
-            elseif center < price
+            if center < price
               sp = mean([center, price])
             elseif center > price
               sp = pdata[end,P975]
@@ -548,12 +544,12 @@ function positions(account_id::Int64, instrument::AbstractString, side::Abstract
     # buy side
     if side != "sell" && (pdata[end,P500] < pdata[1,P500])
       if center < pdata[end,P250] && average_data > center
-        @async orders(account_id, instrument, unit, "buy", "stop", next_time, center + std_u / 10.0, pdata[end,P025], mean([pdata[end,P250], pdata[end,P500]]))
+        @async orders(account_id, instrument, unit, "buy", "stop", next_time, center + std_u / 10.0, pdata[end,P025], pdata[end,P500])
       end
     # sell side
     elseif side != "buy" && (pdata[end,P500] > pdata[1,P500])
       if center > pdata[end,P750] && average_data < center
-        @async orders(account_id, instrument, unit, "sell", "stop", next_time, center - std_u / 10.0, pdata[end,P975], mean([pdata[end,P750], pdata[end,P500]]))
+        @async orders(account_id, instrument, unit, "sell", "stop", next_time, center - std_u / 10.0, pdata[end,P975], pdata[end,P500])
       end
     end
 
