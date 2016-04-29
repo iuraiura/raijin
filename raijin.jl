@@ -19,10 +19,10 @@ API_NAME = ""
 @everywhere TOKEN = ""
 
 # 為替変動に対応させるため金額のプール設定。使用金額の三分の一程度は指定しておいたほうが良い
-POOL = 500000
+POOL = 1000000
 
 # 投入金額再評価回数。チケット数程度。
-UNITS_TIME = 50
+UNITS_TIME = 5
 
 # 使用通貨ペア設定
 #   フォーマット
@@ -541,15 +541,17 @@ function positions(account_id::Int64, instrument::AbstractString, side::Abstract
     next_time = now(Dates.UTC) + Dates.Minute(INTERVAL_TIME)
     std_u = pdata[end,P750] - pdata[end,P500]
 
+    unit_cal = abs((pdata[end,P500] - center) / (pdata[end,P975] - pdata[end,P025])) * unit
+
     # buy side
     if side != "sell" && (pdata[end,P500] < pdata[1,P500])
       if center < pdata[end,P250] && average_data > center
-        @async orders(account_id, instrument, unit, "buy", "stop", next_time, center + std_u / 10.0, pdata[end,P025], pdata[end,P500])
+        @async orders(account_id, instrument, unit_cal, "buy", "stop", next_time, center + std_u / 10.0, pdata[end,P025], pdata[end,P500])
       end
     # sell side
     elseif side != "buy" && (pdata[end,P500] > pdata[1,P500])
       if center > pdata[end,P750] && average_data < center
-        @async orders(account_id, instrument, unit, "sell", "stop", next_time, center - std_u / 10.0, pdata[end,P975], pdata[end,P500])
+        @async orders(account_id, instrument, unit_cal, "sell", "stop", next_time, center - std_u / 10.0, pdata[end,P975], pdata[end,P500])
       end
     end
 
