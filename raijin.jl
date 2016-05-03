@@ -382,6 +382,7 @@ end
 
 @everywhere function move(account_id::Int64, instrument::AbstractString, pdata::Array)
   try
+    sleep(5)
     code, tr = get_trades(account_id, instrument)
     if code > 0 || length(tr) == 0
         return
@@ -544,15 +545,11 @@ function positions(account_id::Int64, instrument::AbstractString, side::Abstract
     unit_cal = abs((pdata[end,P500] - center) / (pdata[end,P975] - pdata[end,P025])) * unit
 
     # buy side
-    if side != "sell" && (pdata[end,P500] < pdata[1,P500])
-      if center < pdata[end,P250] && average_data > center
-        @async orders(account_id, instrument, unit_cal, "buy", "stop", next_time, center + std_u / 10.0, pdata[end,P025], pdata[end,P500])
-      end
+    if side != "sell" && (pdata[end,P500] < pdata[end-1,P500]) && (average_data < center < pdata[end,P250])
+      @async orders(account_id, instrument, unit_cal, "buy", "limit", next_time, center, pdata[end,P025], pdata[end,P500])
     # sell side
-    elseif side != "buy" && (pdata[end,P500] > pdata[1,P500])
-      if center > pdata[end,P750] && average_data < center
-        @async orders(account_id, instrument, unit_cal, "sell", "stop", next_time, center - std_u / 10.0, pdata[end,P975], pdata[end,P500])
-      end
+  elseif side != "buy" && (pdata[end,P500] > pdata[end-1,P500]) && (average_data > center > pdata[end,P750])
+      @async orders(account_id, instrument, unit_cal, "sell", "limit", next_time, center, pdata[end,P975], pdata[end,P500])
     end
 
     println("$(now()) : シミュレーション結果：通貨ペア（$instrument）現在値=$center")
