@@ -660,10 +660,10 @@ function simulation(instrument::AbstractString)
       unit_cal = abs((pdata[end,P500] - center) / (pdata[end,P975] - pdata[end,P025])) * unit
 
       # buy side
-      if side != "sell" && (pdata[end,P500] < pdata[end-1,P500]) && (pdata[end,P500] < pdata[1,P500]) && center < pdata[end,P500]
+      if side != "sell" && (pdata[end,P500] < pdata[end-1,P500]) && (pdata[end,P500] < pdata[1,P500]) && center < pdata[end,P250]
         @async orders(account_id, instrument, unit_cal, "buy", "limit", next_time, center, pdata[end,P025], pdata[end,P500])
         # sell side
-      elseif side != "buy" && (pdata[end,P500] > pdata[end-1,P500]) && (pdata[end,P500] > pdata[1,P500]) && center > pdata[end,P500]
+      elseif side != "buy" && (pdata[end,P500] > pdata[end-1,P500]) && (pdata[end,P500] > pdata[1,P500]) && center > pdata[end,P750]
         @async orders(account_id, instrument, unit_cal, "sell", "limit", next_time, center, pdata[end,P975], pdata[end,P500])
       end
 
