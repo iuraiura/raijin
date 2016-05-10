@@ -663,14 +663,14 @@ function simulation(instrument::AbstractString)
       if side != "sell" && (pdata[end,P500] < pdata[1,P500])
         if (pdata[end,P500] < pdata[end-1,P500]) && (center < pdata[end,P250])
           @async orders(account_id, instrument, unit_cal, "buy", "limit", next_time, center, pdata[end,P025], pdata[end,P500])
-        elseif (center < pdata[end,P250] + std_u / 5.0)
+        elseif (center < pdata[end,P250] + std_u / 5.0) && side == ""
           @async orders(account_id, instrument, unit_cal, "buy", "stop", next_time, pdata[end,P250] - std_u, pdata[end,P025], pdata[end,P500])
         end
         # sell side
       elseif side != "buy" && (pdata[end,P500] > pdata[1,P500])
         if (pdata[end,P500] > pdata[end-1,P500]) && (center > pdata[end,P750])
           @async orders(account_id, instrument, unit_cal, "sell", "limit", next_time, center, pdata[end,P975], pdata[end,P500])
-        elseif (center > pdata[end,P750] - std_u / 5.0)
+        elseif (center > pdata[end,P750] - std_u / 5.0) && side == ""
           @async orders(account_id, instrument, unit_cal, "sell", "stop", next_time, pdata[end,P750] + std_u, pdata[end,P975], pdata[end,P500])
         end
       end
