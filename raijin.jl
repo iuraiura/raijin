@@ -18,8 +18,8 @@ API_NAME = ""
 # アクセストークン設定
 @everywhere TOKEN = ""
 
-# 為替変動に対応させるため金額のプール設定。使用金額の三分の一程度は指定しておいたほうが良い
-POOL = 1000000
+# 為替変動に対応させるため金額のプール設定。
+POOL = 100000
 
 # 投入金額再評価回数。チケット数程度。
 UNITS_TIME = 2
@@ -365,7 +365,7 @@ function simulation(instrument::AbstractString)
       ]
 
       setsamplers!(model, scheme)
-      sim = mcmc(model, data, inits, 10000, burnin=2000, thin=2, chains=2)
+      sim = mcmc(model, data, inits, 10000, burnin=250, thin=2, chains=3)
 
       ppd = predict(sim, :y)
       p = quantile(ppd)
@@ -415,8 +415,8 @@ function simulation(instrument::AbstractString)
           return
         end
         if side == "buy"
-          if price < pdata[end,P500]
-            tp = pdata[end,P500]
+          if price < pdata[end,P250]
+            tp = pdata[end,P250]
           else
             tp = price + std_u / 10.0
           end
@@ -426,8 +426,8 @@ function simulation(instrument::AbstractString)
             sp = pdata[end,P025]
           end
         elseif side == "sell"
-          if price > pdata[end,P500]
-            tp = pdata[end,P500]
+          if price > pdata[end,P750]
+            tp = pdata[end,P750]
           else
             tp = price - std_u / 10.0
           end
@@ -662,18 +662,21 @@ function simulation(instrument::AbstractString)
       # buy side
       if side != "sell" && (pdata[end,P500] < pdata[1,P500])
         if (pdata[end,P500] < pdata[end-1,P500]) && (center < pdata[end,P250])
-          @async orders(account_id, instrument, unit_cal, "buy", "limit", next_time, center, pdata[end,P025], pdata[end,P500])
+          @async orders(account_id, instrument, unit_cal, "buy", "limit", next_time, center, pdata[end,P025], pdata[end,P250])
         elseif (center < pdata[end,P250] + std_u / 5.0) && side == ""
-          @async orders(account_id, instrument, unit_cal, "buy", "stop", next_time, pdata[end,P250] - std_u, pdata[end,P025], pdata[end,P500])
+          @async orders(account_id, instrument, unit_cal, "buy", "stop", next_time, pdata[end,P250] - std_u, pdata[end,P025], pdata[end,P250])
         end
         # sell side
       elseif side != "buy" && (pdata[end,P500] > pdata[1,P500])
         if (pdata[end,P500] > pdata[end-1,P500]) && (center > pdata[end,P750])
-          @async orders(account_id, instrument, unit_cal, "sell", "limit", next_time, center, pdata[end,P975], pdata[end,P500])
+          @async orders(account_id, instrument, unit_cal, "sell", "limit", next_time, center, pdata[end,P975], pdata[end,P750])
         elseif (center > pdata[end,P750] - std_u / 5.0) && side == ""
-          @async orders(account_id, instrument, unit_cal, "sell", "stop", next_time, pdata[end,P750] + std_u, pdata[end,P975], pdata[end,P500])
+          @async orders(account_id, instrument, unit_cal, "sell", "stop", next_time, pdata[end,P750] + std_u, pdata[end,P975], pdata[end,P750])
         end
       end
+
+      println("$(now()): buy | $(pdata[end,P500] < pdata[end-1,P500]) | $(pdata[end,P500] < pdata[1,P500]) | $(center < pdata[end,P250])")
+      println("$(now()): sell | $(pdata[end,P500] > pdata[end-1,P500]) | $(pdata[end,P500] > pdata[1,P500]) | $(center > pdata[end,P750])")
 
       println("$(now()) : シミュレーション結果：通貨ペア（$instrument）現在値=$center")
       println("$(now()) : 97.5%[短期]=$(pdata[end,P975])|[長期]=$(pdata[1,P975])")
