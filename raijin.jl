@@ -96,10 +96,9 @@ Dict([
 @everywhere  USE = 3
 # サンプリング単位時間[一日単位で]
 GRANULARITY = "D"
-# サンプリング数[半期を考えている。２０営業日＊６＋５営業日]
-TIMES = -125
-GRANULARITY_S = "H1"
-TIMES_S = -24
+# サンプリング数
+TIMES = -245
+
 INTERVAL_TIME = 60
 # レバレッジ
 LECERAGE = 25
@@ -313,38 +312,21 @@ end
 # MCMC
 function simulation(instrument::AbstractString)
   try
-    j = 0
     cv = []
     tdata = []
-    code, cand1 = get_candles(instrument, GRANULARITY, TIMES, (now(Dates.UTC) - Dates.Second(GRANULARITY_SECONDS[GRANULARITY])))
-    if code > 0
-      return 0
-    end
-    for i in cand1
-      j += 1
-      push!(cv, i["highMid"])
-      push!(tdata, j)
-      push!(cv, i["lowMid"])
-      push!(tdata, j)
-    end
-
-    if j == 0
-      return 0
-    end
-
-    code, cand1 = get_candles(instrument, GRANULARITY_S, TIMES_S, now(Dates.UTC))
+    code, cand1 = get_candles(instrument, GRANULARITY, TIMES, now(Dates.UTC))
     if code > 0
       return 0
     end
 
-    k = GRANULARITY_SECONDS[GRANULARITY_S] / GRANULARITY_SECONDS[GRANULARITY]
-
+    t = 0
     for i in cand1
-      j += k
+      #t = Int64(DateTime(i["time"], "yyyy-mm-ddTHH:MM:SS.000000Z"))
+      t += 1
       push!(cv, i["highMid"])
-      push!(tdata, j)
+      push!(tdata, t)
       push!(cv, i["lowMid"])
-      push!(tdata, j)
+      push!(tdata, t)
     end
 
     data = Dict{Symbol, Any}(
@@ -361,11 +343,11 @@ function simulation(instrument::AbstractString)
     :beta => rand(Normal(0, 1), 2),
     :s2 => rand(Gamma(1, 1))
     )
-    for i in 1:3
+    for i in 1:4
       ]
 
       setsamplers!(model, scheme)
-      sim = mcmc(model, data, inits, 10000, burnin=250, thin=2, chains=3)
+      sim = mcmc(model, data, inits, 3000, burnin=500, thin=4, chains=4)
 
       ppd = predict(sim, :y)
       p = quantile(ppd)
@@ -657,26 +639,18 @@ function simulation(instrument::AbstractString)
       next_time = now(Dates.UTC) + Dates.Minute(INTERVAL_TIME)
       std_u = pdata[end,P750] - pdata[end,P500]
 
-      unit_cal = abs((pdata[end,P500] - center) / (pdata[end,P975] - pdata[end,P025])) * unit
-
       # buy side
-      if side != "sell" && (pdata[end,P500] < pdata[1,P500])
-        if (pdata[end,P500] < pdata[end-1,P500]) && (center < pdata[end,P250])
-          @async orders(account_id, instrument, unit_cal, "buy", "limit", next_time, center, pdata[end,P025], pdata[end,P250])
-        elseif (center < pdata[end,P250] + std_u / 5.0) && side == ""
-          @async orders(account_id, instrument, unit_cal, "buy", "stop", next_time, pdata[end,P250] - std_u, pdata[end,P025], pdata[end,P250])
-        end
-        # sell side
-      elseif side != "buy" && (pdata[end,P500] > pdata[1,P500])
-        if (pdata[end,P500] > pdata[end-1,P500]) && (center > pdata[end,P750])
-          @async orders(account_id, instrument, unit_cal, "sell", "limit", next_time, center, pdata[end,P975], pdata[end,P750])
-        elseif (center > pdata[end,P750] - std_u / 5.0) && side == ""
-          @async orders(account_id, instrument, unit_cal, "sell", "stop", next_time, pdata[end,P750] + std_u, pdata[end,P975], pdata[end,P750])
-        end
+      if side != "sell" && (center < pdata[end,P250])
+        unit_cal = abs((pdata[end,P250] - center) / (pdata[end,P975] - pdata[end,P025])) * unit
+        @async orders(account_id, instrument, unit_cal, "buy", "limit", next_time, mean([pdata[end,P250],pdata[end,P025]]), pdata[end,P025], pdata[end,P250])
+      # sell side
+      elseif side != "buy" && (center > pdata[end,P750])
+        unit_cal = abs((pdata[end,P750] - center) / (pdata[end,P975] - pdata[end,P025])) * unit
+        @async orders(account_id, instrument, unit_cal, "sell", "limit", next_time, mean([pdata[end,P750],pdata[end,P975]]), pdata[end,P975], pdata[end,P750])
       end
 
-      println("$(now()): buy | $(pdata[end,P500] < pdata[end-1,P500]) | $(pdata[end,P500] < pdata[1,P500]) | $(center < pdata[end,P250])")
-      println("$(now()): sell | $(pdata[end,P500] > pdata[end-1,P500]) | $(pdata[end,P500] > pdata[1,P500]) | $(center > pdata[end,P750])")
+      println("$(now()): buy | $(center < pdata[end,P250])")
+      println("$(now()): sell | $(center > pdata[end,P750])")
 
       println("$(now()) : シミュレーション結果：通貨ペア（$instrument）現在値=$center")
       println("$(now()) : 97.5%[短期]=$(pdata[end,P975])|[長期]=$(pdata[1,P975])")
