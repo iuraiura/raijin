@@ -30,15 +30,16 @@ UNITS_TIME = 2
 @everywhere CURRECY =
   Dict([
     ("AUD_JPY", (3, 80, true)),
-    ("AUD_USD", (5, 100, true)),
+    ("AUD_USD", (5, 100, false)),
     ("EUR_AUD", (5, 80, true)),
+    ("EUR_NZD", (5, 80, true)),
     ("EUR_CHF", (5, 120, true)),
-    ("EUR_GBP", (5, 140, true)),
+    ("EUR_GBP", (5, 140, false)),
     ("EUR_JPY", (3, 140, true)),
     ("EUR_USD", (5, 120, true)),
-    ("EUR_CAD", (5, 180, true)),
+    ("EUR_CAD", (5, 180, false)),
     ("GBP_CHF", (5, 180, true)),
-    ("GBP_JPY", (3, 160, true)),
+    ("GBP_JPY", (3, 160, false)),
     ("NZD_USD", (5, 80, true)),
     ("USD_CHF", (5, 120, true)),
     ("USD_JPY", (3, 120, true)),
@@ -49,20 +50,20 @@ UNITS_TIME = 2
     ("ZAR_JPY", (3, 700, false)),
     ("SGD_JPY", (3, 80, false)),
     ("GBP_USD", (5, 160, true)),
-    ("GBP_CAD", (5, 300, true)),
-    ("GBP_AUD", (5, 150, true)),
-    ("GBP_NZD", (5, 150, false)),
+    ("GBP_CAD", (5, 300, false)),
+    ("GBP_AUD", (5, 150, false)),
+    ("GBP_NZD", (5, 150, true)),
     ("GBP_SGD", (5, 320, false)),
     ("GBP_CHF", (5, 150, true)),
     ("USD_THB", (5, 40, false)),
     ("USD_SGD", (5, 150, false)),
     ("USD_HKD", (5, 10, false)),
-    ("USD_CNH", (5, 700, false)),
-    ("USD_CAD", (5, 130, true)),
+    ("USD_CNH", (5, 700, true)),
+    ("USD_CAD", (5, 130, false)),
     ("SGD_CHF", (5, 100, false)),
     ("CAD_CHF", (5, 70, true)),
     ("AUD_CHF", (5, 70, true)),
-    ("NZD_CHF", (5, 70, false)),
+    ("NZD_CHF", (5, 70, true)),
     ("EUR_SGD", (5, 200, false)),
     ("AUD_SGD", (5, 200, false)),
     ("EUR_TRY", (5, 300, false)),
@@ -98,7 +99,7 @@ UNITS_TIME = 2
 # サンプリング単位時間[一日単位で]
 GRANULARITY = "D"
 # サンプリング数
-TIMES = -125
+TIMES = -500
 GRANULARITY_S = "H1"
 TIMES_S = -24
 
@@ -320,8 +321,8 @@ end
 function simulation(instrument::AbstractString)
   try
     j = 0
-    cv = []
-    tdata = []
+    cv = Float64[]
+    tdata = Float64[]
     code, cand1 = get_candles(instrument, GRANULARITY, TIMES, (now(Dates.UTC) - Dates.Second(GRANULARITY_SECONDS[GRANULARITY])))
     if code > 0
         return 0
@@ -374,7 +375,7 @@ function simulation(instrument::AbstractString)
     ]
 
     setsamplers!(model, scheme)
-    sim = mcmc(model, data, inits, 3000, burnin=500, thin=4, chains=4)
+    sim = mcmc(model, data, inits, 3000, burnin=1000, thin=4, chains=4)
 
     ppd = predict(sim, :y)
     p = quantile(ppd)
@@ -394,7 +395,7 @@ end
 
 @everywhere function move(account_id::Int64, instrument::AbstractString, pdata::Array)
   try
-    sleep(5)
+    sleep(1)
     code, tr = get_trades(account_id, instrument)
     if code > 0 || length(tr) == 0
       cutoff(account_id)
@@ -519,12 +520,12 @@ end
 
 @everywhere function cutoff(account_id::Int64)
   try
-    sleep(3)
+    sleep(1)
     code, tr = get_trades(account_id)
     if code > 0 || length(tr) == 0
       return
     end
-    inst = []
+    inst = AbstractString[]
 
     for t in tr
       push!(inst, t["instrument"])
@@ -674,11 +675,11 @@ function positions(account_id::Int64, instrument::AbstractString, side::Abstract
     # buy side
     if side != "sell" && (center < pdata[end,P250]) && (center > average)
       unit_cal = abs((pdata[end,P250] - center) / (pdata[end,P975] - pdata[end,P025])) * unit
-      @async orders(account_id, instrument, unit_cal, "buy", "limit", next_time, mean([pdata[end,P250],pdata[end,P250],pdata[end,P250],pdata[end,P025]]), pdata[end,P025], pdata[end,P250])
+      @async orders(account_id, instrument, unit_cal, "buy", "limit", next_time, pdata[end,P250], pdata[end,P025], pdata[end,P250])
     # sell side
   elseif side != "buy" && (center > pdata[end,P750]) && (center < average)
       unit_cal = abs((pdata[end,P750] - center) / (pdata[end,P975] - pdata[end,P025])) * unit
-      @async orders(account_id, instrument, unit_cal, "sell", "limit", next_time, mean([pdata[end,P750],pdata[end,P750],pdata[end,P750],pdata[end,P975]]), pdata[end,P975], pdata[end,P750])
+      @async orders(account_id, instrument, unit_cal, "sell", "limit", next_time, pdata[end,P750], pdata[end,P975], pdata[end,P750])
     end
 
     println("$(now()): buy | $(side != "sell") | $(center < pdata[end,P250]) | $(center > average)")
@@ -703,11 +704,11 @@ end
 # main function
 
 n = 0
-unit = 0
+unit = 0.0
 last_time = now(Dates.UTC) - Dates.Second(30)
 code, account_id = get_accountsid(API_NAME)
 
-cur = []
+cur = AbstractString[]
 for c in keys(CURRECY)
   if CURRECY[c][USE] push!(cur, c) end
 end
@@ -760,7 +761,7 @@ while true
     println("＊＊＊＊＊　注文中ポジション処理（開始）＊＊＊＊＊")
     code, tr = get_orders(account_id)
     if code == 0 || length(tr) > 0
-      inst = []
+      inst = AbstractString[]
 
       for t in tr
         push!(inst, t["instrument"])
